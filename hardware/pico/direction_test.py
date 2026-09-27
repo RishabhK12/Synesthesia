@@ -1,8 +1,8 @@
 """Experimental three-microphone direction test for Raspberry Pi Pico.
 
-Run from Thonny using MicroPython. Nothing is sent to the phone or network.
-This estimates the side with the strongest sound increase, not arrival-time
-direction. Set ANGLES to match the actual microphone positions on your rig.
+Run from Thonny or install as main.py on Pico. Sound events are printed as
+SND1-prefixed JSON lines over the Pico's USB serial connection. No network
+connection is used. Set ANGLES to match the actual microphone positions.
 """
 
 from machine import ADC, Pin
@@ -174,8 +174,16 @@ def describe_event(peak_scores, peak_rms, peak_clip):
     for i in range(1, 3):
         if peak_scores[i] > peak_scores[strongest]:
             strongest = i
-    if max(peak_clip) >= 5.0:
+    clipped = max(peak_clip) >= 5.0
+    if clipped:
         print("CLIPPED: lower gain or move the sound farther away.")
+    if clipped:
+        status = "clipped"
+        angle = None
+    elif angle is None:
+        status = "ambiguous"
+    else:
+        status = "ok"
     if angle is None:
         label = "uncertain direction"
     else:
@@ -189,6 +197,18 @@ def describe_event(peak_scores, peak_rms, peak_clip):
             peak_clip[0], peak_clip[1], peak_clip[2],
         )
     )
+    # The phone/web reader should ignore all other printed diagnostic lines.
+    # One complete SND1 line is one event; angle is clockwise from rig front.
+    print("SND1 " + json.dumps({
+        "v": 1,
+        "type": "sound_direction",
+        "angle_deg": None if angle is None else round(angle, 1),
+        "separation": round(strength, 3),
+        "status": status,
+        "clipped": clipped,
+        "peak_rms": [int(value) for value in peak_rms],
+        "t_ms": time.ticks_ms(),
+    }))
 
 
 def main():

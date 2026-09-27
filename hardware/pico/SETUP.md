@@ -53,6 +53,42 @@ automatic gain may change its response for other sounds, so calibration cannot
 make this a precise direction sensor. If the quiet RMS fluctuates as much as
 speech, fix that first; loudness calibration cannot separate those signals.
 
+Each event also prints a line beginning `SND1 ` followed by JSON. A USB
+receiver can ignore the human-readable test lines and parse only complete
+`SND1 ` lines. `angle_deg` is clockwise from the rig's front; it is `null`
+when the event is ambiguous or clipped. `separation` is a rough geometric
+score from 0 to 1, not a calibrated probability. `status` is `ok`,
+`ambiguous`, or `clipped`. `peak_rms` lists GP26/GP27/GP28 readings; `t_ms`
+is the Pico's uptime in milliseconds. No sound waveform is sent.
+
+For USB use without Thonny, save both `direction_test.py` and `main.py` from
+this folder to the **Raspberry Pi Pico** root using Thonny's File > Save as...
+menu. Do not rename or overwrite an existing `main.py` on the Pico without
+saving its contents first. Unplug the computer and connect the Pico to the
+phone with a USB data cable; `main.py` then starts when the Pico powers up.
+The initial quiet calibration runs again on each power-up. Only the optional
+level correction remains in `mic_level_cal.json` on the Pico.
+
+### Chrome on Android web app
+
+`webusb_demo.html` is a standalone receiver and simple compass display that
+can be adapted into an existing web app. Host it over **HTTPS** and open it in
+Chrome on the phone. Connect the Pico to the phone with a USB-C-to-micro-USB
+data cable, keep the microphones quiet for five seconds after plugging it in,
+then tap **Connect Pico** and approve Chrome's USB access prompt. Make a sound
+near one mic and pause to produce an event. The page parses only `SND1 ` lines
+and emits a `pico-sound` browser event containing the parsed JSON for reuse by
+another UI. It clears the arrow after 2.5 seconds and never shows an angle for
+a clipped or ambiguous event.
+
+Android Chrome does not provide the normal desktop Web Serial API. This demo
+uses WebUSB directly with the Pico MicroPython USB CDC device (VID `0x2E8A`,
+PID `0x0005`). The WebUSB permission picker must be opened by a user tap. This
+USB path has not yet been tested with the specific phone and Pico firmware;
+if Chrome does not expose the device, a native Android USB bridge or a wireless
+ESP32 link would be the next option. The webpage and Pico must have exclusive
+use of the connection; disconnect Thonny before connecting the phone.
+
 The angle is a *rough sound-level direction*, not a measured arrival angle.
 The Pico reads its ADC channels in quick succession rather than simultaneously.
 The MAX9814 changes gain automatically, so it can distort sound-level

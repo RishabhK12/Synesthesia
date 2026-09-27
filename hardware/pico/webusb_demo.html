@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pico sound direction</title>
+  <style>
+    body { margin: 0; background: #101820; color: #fff; font: 18px system-ui, sans-serif; text-align: center; }
+    main { max-width: 440px; margin: auto; padding: 24px; }
+    button { background: #4bd4b0; color: #071e1b; border: 0; border-radius: 12px; padding: 14px 22px; font: bold 18px system-ui; }
+    #status { min-height: 3em; color: #b8ccd0; }
+    #compass { width: 240px; height: 240px; border: 3px solid #6d8890; border-radius: 50%; margin: 24px auto; position: relative; }
+    #front { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); }
+    #arrow { position: absolute; inset: 0; display: none; transition: transform 150ms ease; }
+    #arrow::before { content: ""; position: absolute; left: calc(50% - 13px); top: 38px; border-left: 13px solid transparent; border-right: 13px solid transparent; border-bottom: 0; border-top: 42px solid #4bd4b0; transform: rotate(180deg); }
+    #arrow::after { content: ""; position: absolute; left: calc(50% - 5px); top: 78px; width: 10px; height: 82px; background: #4bd4b0; border-radius: 5px; }
+    #cue { font-size: 24px; font-weight: 700; min-height: 2em; }
+    #details { color: #b8ccd0; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Sound direction</h1>
+    <button id="connect">Connect Pico</button>
+    <p id="status" role="status">Connect the Pico by USB, then tap the button.</p>
+    <div id="compass" aria-hidden="true"><span id="front">FRONT</span><div id="arrow"></div></div>
+    <div id="cue" role="status">Waiting for sound</div>
+    <div id="details"></div>
+  </main>
+  <script type="module">
+    const connectButton = document.querySelector("#connect");
+    const status = document.querySelector("#status");
+    const cue = document.querySelector("#cue");
+    const details = document.querySelector("#details");
+    const arrow = document.querySelector("#arrow");
+    let clearTimer;
+    let connected = false;
+
+    function showEvent(event) {
+      if (event?.v !== 1 || event.type !== "sound_direction") return;
+      clearTimeout(clearTimer);
+      if (event.status === "ok" && Number.isFinite(event.angle_deg)) {
+        const angle = ((event.angle_deg % 360) + 360) % 360;
+        arrow.style.transform = `rotate(${angle}deg)`;
+        arrow.style.display = "block";
+        cue.textContent = `Sound at about ${Math.round(angle)}°`;
+        details.textContent = `Direction separation: ${Number(event.separation).toFixed(2)}`;
+      } else {
+        arrow.style.display = "none";
+        cue.textContent = "Direction unclear";
+        details.textContent = event.status === "clipped" ? "Sound was too loud for a reliable reading." : "The microphones did not agree on one direction.";
+      }
+      // Your own web app can listen for this event and draw its own cue.
+      window.dispatchEvent(new CustomEvent("pico-sound", { detail: event }));
+      clearTimer = setTimeout(() => {
+        arrow.style.display = "none";
+        cue.textContent = "Waiting for sound";
+        details.textContent = "";
+      }, 2500);
+    }
+
+    function acceptText(chunk, state) {
+      state.pending += state.decoder.decode(chunk, { stream: true });
+      if (state.pending.length > 8192) state.pending = state.pending.slice(-4096);
+      let end;
+      while ((end = state.pending.indexOf("\n")) !== -1) {
+        const line = state.pending.slice(0, end).trim();
+        state.pending = state.pending.slice(end + 1);
+        if (!line.startsWith("SND1 ")) continue;
+        try { showEvent(JSON.parse(line.slice(5))); }
+        catch (error) { console.warn("Bad Pico event", error); }
+      }
+    }
+
+    async function connectPico() {
+      if (connected) return;
+      if (!window.isSecureContext || !navigator.usb) {
+        status.textContent = "This Chrome page needs HTTPS and WebUSB support.";
+        return;
+      }
+      let device;
+      connected = true;
+      connectButton.disabled = true;
+      try {
+        // Raspberry Pi Pico MicroPython USB CDC: VID 2E8A, PID 0005.
+        device = await navigator.usb.requestDevice({
+          filters: [{ vendorId: 0x2e8a, productId: 0x0005 }]
+        });
+        await device.open();
+        if (!device.configuration) await device.selectConfiguration(1);
+        const interfaces = device.configuration.interfaces;
+        const control = interfaces.find(item => item.alternates.some(alt => alt.interfaceClass === 2));
+        const data = interfaces.find(item => item.alternates.some(alt => alt.interfaceClass === 10));
+        if (!control || !data) throw new Error("Pico USB serial interfaces were not found");
+        await device.claimInterface(control.interfaceNumber);
+        await device.claimInterface(data.interfaceNumber);
+        const input = data.alternates[0].endpoints.find(ep => ep.direction === "in");
+        if (!input) throw new Error("Pico USB input endpoint was not found");
+
+        // CDC-ACM line coding: 115200 baud, 8 data bits, no parity, 1 stop bit.
+        const coding = new ArrayBuffer(7);
+        const view = new DataView(coding);
+        view.setUint32(0, 115200, true);
+        view.setUint8(4, 0);
+        view.setUint8(5, 0);
+        view.setUint8(6, 8);
+        const setup = (request, value) => ({
+          requestType: "class", recipient: "interface", request,
+          value, index: control.interfaceNumber
+        });
+        const lineResult = await device.controlTransferOut(setup(0x20, 0), coding);
+        const dtrResult = await device.controlTransferOut(setup(0x22, 1));
+        if (lineResult.status !== "ok" || dtrResult.status !== "ok") {
+          throw new Error("Could not open Pico USB serial");
+        }
+
+        status.textContent = "Pico connected. Make a sound near one microphone, then pause.";
+        const state = { decoder: new TextDecoder(), pending: "" };
+        while (device.opened) {
+          const result = await device.transferIn(input.endpointNumber, 64);
+          if (result.status !== "ok") throw new Error(`USB read: ${result.status}`);
+          if (result.data?.byteLength) {
+            acceptText(new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength), state);
+          }
+        }
+      } catch (error) {
+        status.textContent = error.name === "NotFoundError" ? "No Pico selected." : `Connection stopped: ${error.message}`;
+      } finally {
+        if (device?.opened) await device.close().catch(() => {});
+        connected = false;
+        connectButton.disabled = false;
+      }
+    }
+
+    connectButton.addEventListener("click", connectPico);
+  </script>
+</body>
+</html>
