@@ -97,7 +97,7 @@ public final class CompassActivity extends Activity implements SensorEventListen
         visual.setPadding(dp(10), dp(6), dp(4), dp(8));
         root.addView(visual, new LinearLayout.LayoutParams(0, -1, .44f));
         TextView title = text(visual, "Sound compass", 22);
-        title.setTypeface(null, 1);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
         circle = new CompassView(this);
         visual.addView(circle, new LinearLayout.LayoutParams(-1, 0, 1));
         synchronized (model) { circle.set(null, model.usable()); }
@@ -197,6 +197,8 @@ public final class CompassActivity extends Activity implements SensorEventListen
         int min = AudioRecord.getMinBufferSize(FS, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT);
         if (min <= 0) { status.setText("48 kHz stereo recording is unavailable."); return; }
         try {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                throw new SecurityException("Microphone permission is required");
             recorder = new AudioRecord(MediaRecorder.AudioSource.CAMCORDER, FS, AudioFormat.CHANNEL_IN_STEREO,
                     AudioFormat.ENCODING_PCM_16BIT, Math.max(min, BLOCK * 16));
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED || recorder.getChannelCount() != 2)

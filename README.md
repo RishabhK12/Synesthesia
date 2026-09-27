@@ -1,6 +1,63 @@
 # Synesthesia
 HackGT 13 Project
 
+## Offline sound and name alerts (build 3.0)
+
+Open **Listen · sounds and names** from the main screen. This foreground-only
+screen runs YAMNet and sherpa-onnx on the phone. It displays horns, sirens, alarms,
+doorbells and knocking, plus names/nicknames you enter. Speech is a small status
+indicator. No server, API key or runtime model download is needed. Live audio
+stays in memory and is discarded when listening stops.
+
+Enter a name and up to two nicknames or English pronunciation spellings, then
+use **Test my name · 30 seconds** with a helper. Recognition varies by name,
+accent, distance and noise. The test does not train a new model. **Start listening**
+enables the selected categories; **Stop listening**, leaving the screen, or locking
+the phone stops capture. Edit names and category settings while stopped. Vibration
+can be changed while listening. Large cards show overlapping events and a recent
+history remains until the next session. Names persist only in app preferences.
+
+The separate experimental compass can reuse saved calibration and the same stereo
+capture. Its bearing describes the dominant sound, not a particular event card.
+Classification works without compass calibration or a reliable direction.
+
+### Build the offline app
+
+The build now uses the included Gradle 8.13 wrapper and Android Gradle Plugin
+8.12.0. Install JDK 17 or newer, Android SDK platform 35, NDK 27.1.12297006 and
+CMake 3.22.1. The first build needs internet to retrieve pinned libraries,
+tokenizer source and models; subsequent builds reuse the cache. `models.lock.json`
+pins model/runtime source URLs and SHA-256 hashes. The APK bundles the models
+and native libraries for **ARM64 phones**, including the S23 Ultra.
+
+```powershell
+.\build.ps1 -RunTests -SideBySide
+adb install -r .\build\SoundDirectionTest.apk
+```
+
+The standard package is built by omitting `-SideBySide`. On Linux/macOS, set
+`ANDROID_HOME` and run `bash build.sh --tests --side-by-side`. The original signing
+key is reused when `debug.keystore` exists; a clean clone uses Android's default
+debug signing key. Keep the original key to update an existing install without
+losing its saved calibration and diagnostics.
+
+Source layout: `listen/` contains capture, resampling, independent bounded workers,
+model adapters and event filtering; `ListenActivity` provides the screen.
+SentencePiece's native bridge is under `native/`. Model audio and event times use
+the monotonic elapsed-realtime clock; raw scores and result delay are shown only
+when **Show detector diagnostics** is enabled. Audio queues reset after overflow
+instead of replaying stale backlog. Each detector reports its own readiness or
+failure.
+
+Thresholds are provisional, and real-world accuracy targets have not yet been
+established. See [validation and field-test procedure](docs/listen-validation.md)
+for automated checks, listening trials and acceptance targets. Background
+listening, Quest event labels and per-source sound localization are deferred.
+
+The build steps below describe earlier diagnostic builds. For the current app,
+use the Gradle requirements and commands above; existing diagnostic workflows
+and data formats still apply.
+
 ## Experimental 360° sound compass
 
 The **Sound Direction Test → 360° sound compass** screen uses the S23 Ultra's

@@ -252,6 +252,8 @@ public class DiagnosticActivity extends Activity implements SensorEventListener 
             write(reportFile, report.toString(2));
             int min = AudioRecord.getMinBufferSize(FS, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT);
             if (min <= 0) throw new IOException("48 kHz stereo is not supported (" + min + ")");
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                throw new SecurityException("Microphone permission is required");
             recorder = new AudioRecord(SOURCE_IDS[c.sourceIndex], FS, AudioFormat.CHANNEL_IN_STEREO,
                     AudioFormat.ENCODING_PCM_16BIT, Math.max(min, BLOCK * 16));
             if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("This source did not initialize in stereo. Try another source.");

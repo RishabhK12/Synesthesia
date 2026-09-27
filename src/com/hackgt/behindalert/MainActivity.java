@@ -130,6 +130,10 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         TextView title = text(col, "Left / Right Sound Test", 22, COL_FG); title.setTypeface(null, Typeface.BOLD);
+        button(col, "Listen · sounds and names", v -> {
+            stopAudio();
+            startActivity(new Intent(this, ListenActivity.class));
+        });
         button(col, "Microphone test (start here)", v -> {
             stopAudio();
             startActivity(new Intent(this, DiagnosticActivity.class));
@@ -254,6 +258,9 @@ public class MainActivity extends Activity {
     }
 
     void startAudio() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            status.setText("Microphone permission is required."); return;
+        }
         int minBuf = AudioRecord.getMinBufferSize(FS, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT);
         try {
             rec = new AudioRecord(SOURCES[sourceIdx], FS, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT,

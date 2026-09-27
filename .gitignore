@@ -2,3 +2,8 @@
 *.keystore
 /diagnostic-data/
 /compass-data/
+/.tools/
+/.gradle/
+/.gradle-user/
+/.cxx/
+/local.properties

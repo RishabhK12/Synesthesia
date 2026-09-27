@@ -1,0 +1,105 @@
+import groovy.json.JsonSlurper
+import java.security.MessageDigest
+
+plugins { id 'com.android.application' version '8.12.0' }
+
+def prepareModels = tasks.register('prepareModels') {
+    inputs.file('models.lock.json')
+    outputs.dir(layout.buildDirectory.dir('generated/assets'))
+    outputs.dir(layout.buildDirectory.dir('dependencies'))
+    outputs.file(layout.buildDirectory.file('downloads/sherpa-onnx-1.13.8.aar'))
+    doLast {
+        def downloads = file('build/downloads'); downloads.mkdirs()
+        new JsonSlurper().parse(file('models.lock.json')).each { item ->
+            def target = new File(downloads, item.file)
+            if (!target.exists()) {
+                logger.lifecycle("Downloading ${item.file} (build time only)")
+                def partial = new File(downloads, item.file + '.partial')
+                new URL(item.url).withInputStream { input -> partial.withOutputStream { it << input } }
+                java.nio.file.Files.move(partial.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+            def digest = MessageDigest.getInstance('SHA-256')
+            target.withInputStream { input ->
+                byte[] buffer = new byte[65536]; int count
+                while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            if (digest.digest().encodeHex().toString() != item.sha256) throw new GradleException("Checksum mismatch: ${item.file}. Remove this download and retry.")
+        }
+        copy { from 'build/downloads/yamnet.tflite'; into 'build/generated/assets/models' }
+        file('build/generated/assets/models/empty-keywords.txt').text = ''
+        copy {
+            from tarTree(resources.bzip2(file('build/downloads/kws-en.tar.bz2')))
+            include '**/*.int8.onnx', '**/tokens.txt', '**/bpe.model'
+            eachFile { path = name }; includeEmptyDirs = false
+            into 'build/generated/assets/models/kws'
+        }
+        copy { from tarTree(resources.gzip(file('build/downloads/sentencepiece-0.2.1.tar.gz'))); into 'build/dependencies' }
+        copy {
+            from 'build/dependencies/sentencepiece-0.2.1'
+            include 'LICENSE', 'third_party/**/LICENSE*', 'third_party/**/COPYING*'
+            into 'build/generated/assets/licenses/sentencepiece'
+        }
+    }
+}
+
+android {
+    namespace 'com.hackgt.behindalert'
+    compileSdk 35
+    ndkVersion '27.1.12297006'
+    defaultConfig {
+        applicationId 'com.hackgt.behindalert'
+        minSdk 24
+        targetSdk 34
+        versionCode 6
+        versionName '3.0-local-listen'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_shared'; cppFlags '-std=c++17'; targets 'name_tokenizer' } }
+    }
+    signingConfigs { localDebug { storeFile file('debug.keystore'); storePassword 'android'; keyAlias 'key'; keyPassword 'android' } }
+    buildTypes { debug { if (file('debug.keystore').exists()) signingConfig signingConfigs.localDebug } }
+    flavorDimensions += 'installation'
+    productFlavors {
+        standard { dimension 'installation'; manifestPlaceholders = [appLabel: 'Sound Direction'] }
+        sideBySide { dimension 'installation'; applicationIdSuffix '.diagnostics'; manifestPlaceholders = [appLabel: 'Sound Direction Test'] }
+    }
+    sourceSets {
+        main { manifest.srcFile 'AndroidManifest.xml'; java.srcDirs = ['src']; assets.srcDirs = ['assets', 'build/generated/assets'] }
+        test { java.srcDirs = ['test', 'tests/unit'] }
+        androidTest { java.srcDirs = ['tests/android']; assets.srcDirs = ['tests/assets'] }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    externalNativeBuild { cmake { path 'native/CMakeLists.txt'; version '3.22.1' } }
+    androidResources { noCompress += ['tflite', 'onnx', 'model'] }
+    packaging { jniLibs { useLegacyPackaging = false } }
+    lint { abortOnError true }
+}
+
+dependencies {
+    implementation 'com.google.mediapipe:tasks-audio:0.10.21'
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.0'
+    implementation files('build/downloads/sherpa-onnx-1.13.8.aar').builtBy(prepareModels)
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
+
+tasks.configureEach {
+    if (name == 'preBuild' || name.startsWith('configureCMake')) dependsOn prepareModels
+}
+
+tasks.withType(Test).configureEach {
+    exclude 'DspTest.class', 'DirTest.class', 'DiagnosticTest.class', 'CompassTest.class'
+}
+
+def prepareTestAudio = tasks.register('prepareTestAudio', Copy) {
+    dependsOn prepareModels
+    from { tarTree(resources.bzip2(file('build/downloads/kws-en.tar.bz2'))) }
+    include '**/test_wavs/*.wav'
+    eachFile { path = name }; includeEmptyDirs = false
+    into 'build/generated/testAssets'
+}
+android.sourceSets.androidTest.assets.srcDir('build/generated/testAssets')
+tasks.configureEach {
+    if (name.contains('AndroidTest') && ((name.startsWith('merge') && name.endsWith('Assets')) || name.toLowerCase().contains('lint'))) dependsOn prepareTestAudio
+}

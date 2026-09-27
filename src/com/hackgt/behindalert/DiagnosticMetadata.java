@@ -98,6 +98,7 @@ final class DiagnosticMetadata {
         return a;
     }
 
+    @android.annotation.TargetApi(28)
     private static JSONArray microphones(List<MicrophoneInfo> microphones) throws JSONException {
         JSONArray a = new JSONArray();
         for (MicrophoneInfo m : microphones) {
@@ -117,6 +118,7 @@ final class DiagnosticMetadata {
         return a;
     }
 
+    @android.annotation.TargetApi(28)
     private static Object coordinates(MicrophoneInfo.Coordinate3F p, MicrophoneInfo.Coordinate3F unknown) throws JSONException {
         if (p == null || (p.x == unknown.x && p.y == unknown.y && p.z == unknown.z)) return JSONObject.NULL;
         return new JSONObject().put("x", p.x).put("y", p.y).put("z", p.z);
