@@ -34,6 +34,25 @@ direction information.
 4. If an event says `CLIPPED`, reduce gain or move the sound farther away.
    `uncertain direction` means the channels did not favor one area enough.
 
+### Optional loudness calibration
+
+The five-second quiet calibration runs on every start. To correct for different
+mic sensitivity, set `RUN_LEVEL_CALIBRATION = True` near the top of
+`direction_test.py` and run it once. After the quiet step, the script gives you
+four seconds to position each mic, then measures that mic for 3.5 seconds.
+Use a steady sound from a computer speaker or other fixed source. Keep its
+volume and distance the same for each mic; rotate the whole rig so the named
+mic faces the same speaker position each time. Do not use claps for this step.
+The script rejects a test that is too quiet or clips, and saves a correction
+in `mic_level_cal.json` on the Pico only after all three pass. Set the switch
+back to `False` afterward; later runs load the saved correction. Repeat this
+calibration if you adjust gain, replace a mic, or move the microphones.
+
+This equalizes the three microphones for *one test sound*. The MAX9814's
+automatic gain may change its response for other sounds, so calibration cannot
+make this a precise direction sensor. If the quiet RMS fluctuates as much as
+speech, fix that first; loudness calibration cannot separate those signals.
+
 The angle is a *rough sound-level direction*, not a measured arrival angle.
 The Pico reads its ADC channels in quick succession rather than simultaneously.
 The MAX9814 changes gain automatically, so it can distort sound-level

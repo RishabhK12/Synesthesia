@@ -6,6 +6,7 @@ direction. Set ANGLES to match the actual microphone positions on your rig.
 """
 
 from machine import ADC, Pin
+import json
 import math
 import time
 
@@ -24,6 +25,13 @@ TRIGGER_MULTIPLIER = 1.8
 MIN_RISE_COUNTS = 800  # minimum RMS rise above the quiet median
 MIN_VECTOR_STRENGTH = 0.35
 CLIP_LIMIT = 650  # within about 1% of either ADC rail
+
+# Set to True for one run to measure each microphone against the same steady
+# test sound. Set it back to False afterward; the correction is saved on Pico.
+RUN_LEVEL_CALIBRATION = False
+CALIBRATION_FILE = "mic_level_cal.json"
+LEVEL_TEST_MS = 3500
+LEVEL_PREP_SECONDS = 4
 
 
 def sample_frame(adcs):
@@ -80,8 +88,65 @@ def calibrate(adcs):
         )
         if quiet_high[i] > median[i] * 1.6 and quiet_high[i] - median[i] > 500:
             print("  Quiet signal varies a lot; check wiring and gain.")
-    print("Ready. Make a short sound at one position, then pause.")
     return quiet_high, trigger
+
+
+def level_score(rms, quiet_high, trigger):
+    gap = max(1.0, trigger - quiet_high)
+    return max(0.0, (rms - quiet_high) / gap)
+
+
+def load_level_scales():
+    try:
+        with open(CALIBRATION_FILE) as file:
+            saved = json.loads(file.read())
+        scales = saved["scales"]
+        if saved["pins"] != list(PINS) or len(scales) != 3:
+            raise ValueError("mic layout changed")
+        if any(not 0.5 <= value <= 2.0 for value in scales):
+            raise ValueError("invalid scale")
+        print("Loaded level correction: %.2f/%.2f/%.2f" % tuple(scales))
+        return scales
+    except (OSError, KeyError, TypeError, ValueError):
+        print("No saved level correction; using equal weighting.")
+        return [1.0, 1.0, 1.0]
+
+
+def calibrate_levels(adcs, quiet_high, trigger):
+    print("Level calibration: use one steady sound at a fixed distance.")
+    print("Point each named mic at the same speaker position in turn.")
+    responses = []
+    for i in range(3):
+        print("Prepare %s: %d seconds" % (NAMES[i], LEVEL_PREP_SECONDS))
+        time.sleep(LEVEL_PREP_SECONDS)
+        print("Measuring %s; keep sound and distance steady..." % NAMES[i])
+        values = []
+        worst_clip = 0.0
+        started = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), started) < LEVEL_TEST_MS:
+            rms, clip = sample_frame(adcs)
+            values.append(level_score(rms[i], quiet_high[i], trigger[i]))
+            worst_clip = max(worst_clip, clip[i])
+        values.sort()
+        response = percentile(values, 0.50)
+        print("  Response %.2f, worst clipping %.1f%%" % (response, worst_clip))
+        if response < 1.0 or worst_clip >= 5.0:
+            print("Calibration failed: sound too quiet or clipped. Previous correction kept.")
+            return load_level_scales()
+        responses.append(response)
+
+    ordered = sorted(responses)
+    reference = ordered[1]
+    scales = [min(2.0, max(0.5, reference / value)) for value in responses]
+    try:
+        with open(CALIBRATION_FILE, "w") as file:
+            file.write(json.dumps({"pins": list(PINS), "scales": scales}))
+        print("Saved level correction: %.2f/%.2f/%.2f" % tuple(scales))
+    except OSError:
+        print("Could not save correction; it applies only until this run stops.")
+    if max(responses) / min(responses) > 4.0:
+        print("Large mic mismatch: correction was limited; check gain and wiring.")
+    return scales
 
 
 def direction_from_scores(scores):
@@ -129,6 +194,11 @@ def describe_event(peak_scores, peak_rms, peak_clip):
 def main():
     adcs = tuple(ADC(Pin(pin)) for pin in PINS)
     quiet_high, trigger = calibrate(adcs)
+    if RUN_LEVEL_CALIBRATION:
+        scales = calibrate_levels(adcs, quiet_high, trigger)
+    else:
+        scales = load_level_scales()
+    print("Ready. Make a short sound at one position, then pause.")
     event_active = False
     peak_scores = [0.0, 0.0, 0.0]
     peak_rms = [0.0, 0.0, 0.0]
@@ -148,8 +218,7 @@ def main():
                 for i in range(3):
                     # Divide by each mic's own quiet-to-trigger gap so that
                     # a naturally louder microphone does not always win.
-                    gap = max(1.0, trigger[i] - quiet_high[i])
-                    score = max(0.0, (rms[i] - quiet_high[i]) / gap)
+                    score = level_score(rms[i], quiet_high[i], trigger[i]) * scales[i]
                     peak_scores[i] = max(peak_scores[i], score)
                     peak_rms[i] = max(peak_rms[i], rms[i])
                     peak_clip[i] = max(peak_clip[i], clip[i])
