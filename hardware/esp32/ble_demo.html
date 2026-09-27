@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wireless sound direction</title>
+  <style>
+    body { margin: 0; background: #101820; color: white; font: 18px system-ui, sans-serif; text-align: center; }
+    main { max-width: 440px; margin: auto; padding: 24px; }
+    button { background: #4bd4b0; color: #071e1b; border: 0; border-radius: 12px; padding: 14px 22px; font: bold 18px system-ui; }
+    #status { min-height: 3em; color: #b8ccd0; }
+    #compass { width: 240px; height: 240px; border: 3px solid #6d8890; border-radius: 50%; margin: 24px auto; position: relative; }
+    #front { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); }
+    #arrow { position: absolute; inset: 0; display: none; transition: transform 150ms ease; }
+    #arrow::before { content: ""; position: absolute; left: calc(50% - 13px); top: 38px; border-left: 13px solid transparent; border-right: 13px solid transparent; border-top: 42px solid #4bd4b0; transform: rotate(180deg); }
+    #arrow::after { content: ""; position: absolute; left: calc(50% - 5px); top: 78px; width: 10px; height: 82px; background: #4bd4b0; border-radius: 5px; }
+    #cue { font-size: 24px; font-weight: 700; min-height: 2em; }
+    #details { color: #b8ccd0; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Wireless sound direction</h1>
+    <button id="connect">Connect sensor</button>
+    <p id="status" role="status">Power the Pico and ESP32, then tap Connect sensor.</p>
+    <div id="compass" aria-hidden="true"><span id="front">FRONT</span><div id="arrow"></div></div>
+    <div id="cue" role="status">Waiting for sound</div>
+    <div id="details"></div>
+  </main>
+  <script type="module">
+    const SERVICE_UUID = "0066cf31-d07d-44cf-9a90-af6fb370f5e7";
+    const EVENT_UUID = "e56dd748-976b-4fd1-b7cf-7e9f480f1c7a";
+    const status = document.querySelector("#status");
+    const cue = document.querySelector("#cue");
+    const details = document.querySelector("#details");
+    const arrow = document.querySelector("#arrow");
+    const connectButton = document.querySelector("#connect");
+    let device;
+    let clearTimer;
+
+    function showEvent(event) {
+      clearTimeout(clearTimer);
+      if (event.status === "ok" && Number.isFinite(event.angle_deg)) {
+        arrow.style.transform = `rotate(${event.angle_deg}deg)`;
+        arrow.style.display = "block";
+        cue.textContent = `Sound at about ${Math.round(event.angle_deg)}°`;
+        details.textContent = `Direction separation: ${event.separation.toFixed(2)}${event.rear_triggered ? " · rear sensor also triggered" : ""}`;
+      } else if (event.status === "rear_possible") {
+        arrow.style.display = "none";
+        cue.textContent = "Possible sound behind";
+        details.textContent = "Only the rear threshold sensor triggered; direction is uncertain.";
+      } else {
+        arrow.style.display = "none";
+        cue.textContent = "Direction unclear";
+        details.textContent = (event.status === "clipped" ? "Sound was too loud for a reliable reading." : "The microphones did not agree on one direction.") + (event.rear_triggered ? " Rear sensor also triggered." : "");
+      }
+      // Move this listener into your web app to drive its own visual cue.
+      window.dispatchEvent(new CustomEvent("pico-sound", { detail: event }));
+      clearTimer = setTimeout(() => {
+        arrow.style.display = "none";
+        cue.textContent = "Waiting for sound";
+        details.textContent = "";
+      }, 2500);
+    }
+
+    function receiveNotification(notification) {
+      const data = notification.target.value;
+      if (data.byteLength !== 6 || data.getUint8(0) !== 1) return;
+      const statuses = ["ok", "ambiguous", "clipped", "rear_possible"];
+      const statusByte = data.getUint8(1);
+      const rearTriggered = (statusByte & 0x80) !== 0;
+      const statusCode = statusByte & 0x7f;
+      if (statusCode >= statuses.length) return;
+      const angleTenths = data.getUint16(2, true);
+      const event = {
+        v: 1,
+        type: "sound_direction",
+        status: statuses[statusCode],
+        angle_deg: angleTenths === 0xffff ? null : angleTenths / 10,
+        separation: data.getUint8(4) / 100,
+        clipped: statusCode === 2,
+        rear_triggered: rearTriggered,
+        sequence: data.getUint8(5),
+      };
+      showEvent(event);
+    }
+
+    async function connect() {
+      if (!window.isSecureContext || !navigator.bluetooth) {
+        status.textContent = "This page needs HTTPS and Chrome Web Bluetooth.";
+        return;
+      }
+      connectButton.disabled = true;
+      try {
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ name: "SynDir" }],
+          optionalServices: [SERVICE_UUID],
+        });
+        device.addEventListener("gattserverdisconnected", () => {
+          status.textContent = "Sensor disconnected. Tap Connect sensor to reconnect.";
+          arrow.style.display = "none";
+          connectButton.disabled = false;
+        });
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        const characteristic = await service.getCharacteristic(EVENT_UUID);
+        characteristic.addEventListener("characteristicvaluechanged", receiveNotification);
+        await characteristic.startNotifications();
+        status.textContent = "Sensor connected. Make a sound near one microphone, then pause.";
+      } catch (error) {
+        status.textContent = error.name === "NotFoundError" ? "No sensor selected." : `Connection failed: ${error.message}`;
+        connectButton.disabled = false;
+      }
+    }
+
+    connectButton.addEventListener("click", connect);
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+/build/
+*.keystore
+/diagnostic-data/
+/compass-data/
+__pycache__/
+*.pyc
+.DS_Store
+/.tools/
+/.cxx/
+/.gradle/
+/.gradle-user/

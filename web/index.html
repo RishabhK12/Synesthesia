@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0c0708">
+  <title>Synesthesia · live sound cues</title>
+  <link rel="stylesheet" href="./brand.css">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <div class="backdrop" aria-hidden="true"><i class="s1"></i><i class="s2"></i><i class="s3"></i><i class="s4"></i></div>
+  <video id="camera" autoplay muted playsinline hidden></video>
+  <canvas id="halo" aria-hidden="true"></canvas>
+  <div id="rear-cue" hidden aria-hidden="true"></div>
+
+  <main>
+    <header>
+      <h1 class="wordmark">SYNESTHESIA</h1>
+      <p>Live sound cues on this phone</p>
+    </header>
+
+    <section class="name-setup" aria-labelledby="name-heading">
+      <h2 id="name-heading">Who should we listen for?</h2>
+      <p>Enter your name before listening. You can add two nicknames or pronunciation spellings.</p>
+      <form id="name-form">
+        <label for="your-name">Your name</label>
+        <input id="your-name" type="text" maxlength="60" autocomplete="given-name" required placeholder="Your name">
+        <label for="name-alias-1">Nickname or pronunciation (optional)</label>
+        <input id="name-alias-1" type="text" maxlength="60" autocomplete="off">
+        <label for="name-alias-2">Another nickname (optional)</label>
+        <input id="name-alias-2" type="text" maxlength="60" autocomplete="off">
+        <div class="name-actions"><button type="submit">Save name</button><span id="name-save-status" role="status"></span></div>
+      </form>
+    </section>
+
+    <section class="controls" aria-label="Live sensors">
+      <div class="sensor-row">
+        <span class="indicator" id="bluetooth-indicator"></span>
+        <div><strong>Direction sensor</strong><p id="bluetooth-state" role="status">ESP32 not connected</p></div>
+        <button id="connect-sensor" type="button">Connect</button>
+      </div>
+      <div class="sensor-row">
+        <span class="indicator" id="microphone-indicator"></span>
+        <div><strong>Phone microphone</strong><p id="microphone-state" role="status">Classification off</p></div>
+        <button id="toggle-listening" type="button">Start</button>
+      </div>
+      <div class="sensor-row">
+        <span class="indicator" id="name-indicator"></span>
+        <div><strong>Name alerts</strong><p id="name-state" role="status">Enter a name to enable name alerts</p></div>
+      </div>
+      <div class="sensor-row">
+        <span class="indicator" id="camera-indicator"></span>
+        <div><strong>Camera view</strong><p id="camera-state">Optional live background</p></div>
+        <button id="toggle-camera" type="button">Show</button>
+      </div>
+    </section>
+
+    <div class="latest" role="status" aria-live="polite">
+      <span>Latest cue</span>
+      <strong id="cue-name">Waiting for sound</strong>
+      <p id="cue-direction">Connect SynDir and start the phone microphone.</p>
+    </div>
+
+    <details class="settings">
+      <summary>Sensor setup and diagnostics</summary>
+      <label for="mount-offset">Rig front relative to the phone camera: <output id="mount-value">0°</output></label>
+      <input id="mount-offset" type="range" min="-180" max="180" step="5" value="0">
+      <p>Use 0° when the rig's front points the same way as the back camera. Adjust after testing a sound directly ahead.</p>
+      <label for="sensitivity">Sound classification sensitivity</label>
+      <select id="sensitivity">
+        <option value="1.3">Low</option>
+        <option value="1" selected>Normal</option>
+        <option value="0.75">High</option>
+      </select>
+      <p>Recent phone-mic guesses: <span id="guesses">Waiting for microphone</span></p>
+      <p id="fusion-note">A sound type and direction are paired only when they occur close together.</p>
+    </details>
+
+    <p class="privacy">Sound classification and supported name recognition run on this phone. The ESP32 sends direction events over Bluetooth; no audio is sent to it or to a server.</p>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

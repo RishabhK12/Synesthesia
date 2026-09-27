@@ -1,0 +1,275 @@
+# Pico sound sensor setup
+
+## What runs where
+
+- Thonny runs on Windows. The portable copy in `.tools/thonny` includes its own Python.
+- MicroPython runs on the Pico and provides access to its analog inputs.
+- `sensor_test.py` runs on the Pico, with output displayed in Thonny's Shell.
+- The test uses only built-in MicroPython modules. No pip packages, Arduino IDE,
+  ESP32 setup, or phone software are needed for this stage.
+
+## Experimental direction test
+
+Run `hardware/pico/direction_test.py` in Thonny. `Open Thonny for Pico.cmd`
+opens this file. It uses GP26 for MAX4466, GP27 for MAX9814, and GP28 for
+MAX4466. Power all three from 3V3(OUT) and connect their grounds to AGND;
+keep the three OUT wires separate. The code sends nothing to a phone or network.
+
+Mount the microphones apart on a rigid frame. At the top of the script, set
+`ANGLES` to their real positions, measured clockwise from the front. The
+default `(0, 120, 240)` means GP26 is front, GP27 is right, GP28 is left.
+If they are close together on a breadboard, sound level alone will give little
+direction information. An optional rear LM393 adds a threshold cue on GP22;
+see the wiring and test steps below.
+
+1. Start with 5 seconds of normal quiet. The script measures each mic's quiet
+   RMS level and sets a separate event trigger. Keep hands away from the wires.
+2. Make a short clap or speak for a second near one side, then pause. Repeat
+   from the other two sides at the same distance. A report appears after sound
+   falls below the trigger for about 180 ms.
+3. Read the `RMS ... (triggers ...)` line every second. If quiet readings exceed
+   a trigger, restart in a quieter setup, check wiring, or reduce MAX4466 gain.
+   If speech never crosses a trigger, use a louder test sound or cautiously
+   reduce `TRIGGER_MULTIPLIER` from 1.8. Lower values also admit more false
+   events. The MAX4466 trim pots adjust gain; turn them gently.
+4. If an event says `CLIPPED`, reduce gain or move the sound farther away.
+   `uncertain direction` means the channels did not favor one area enough.
+
+### Optional loudness calibration
+
+The five-second quiet calibration runs on every start. To correct for different
+mic sensitivity, set `RUN_LEVEL_CALIBRATION = True` near the top of
+`direction_test.py` and run it once. After the quiet step, the script gives you
+four seconds to position each mic, then measures that mic for 3.5 seconds.
+Use a steady sound from a computer speaker or other fixed source. Keep its
+volume and distance the same for each mic; rotate the whole rig so the named
+mic faces the same speaker position each time. Do not use claps for this step.
+The script rejects a test that is too quiet or clips, and saves a correction
+in `mic_level_cal.json` on the Pico only after all three pass. Set the switch
+back to `False` afterward; later runs load the saved correction. Repeat this
+calibration if you adjust gain, replace a mic, or move the microphones.
+
+This equalizes the three microphones for *one test sound*. The MAX9814's
+automatic gain may change its response for other sounds, so calibration cannot
+make this a precise direction sensor. If the quiet RMS fluctuates as much as
+speech, fix that first; loudness calibration cannot separate those signals.
+
+Each event also prints a line beginning `SND1 ` followed by JSON. A USB
+receiver can ignore the human-readable test lines and parse only complete
+`SND1 ` lines. `angle_deg` is clockwise from the rig's front; it is `null`
+when the event is ambiguous or clipped. `separation` is a rough geometric
+score from 0 to 1, not a calibrated probability. `status` is `ok`,
+`ambiguous`, `clipped`, or `rear_possible`. The last status means only the rear
+LM393 fired, so it does not claim an angle. `rear_triggered` says whether the
+rear sensor joined an analog event. `peak_rms` lists GP26/GP27/GP28 readings; `t_ms`
+is the Pico's uptime in milliseconds. No sound waveform is sent.
+
+For USB use without Thonny, save both `direction_test.py` and `main.py` from
+this folder to the **Raspberry Pi Pico** root using Thonny's File > Save as...
+menu. Do not rename or overwrite an existing `main.py` on the Pico without
+saving its contents first. Unplug the computer and connect the Pico to the
+phone with a USB data cable; `main.py` then starts when the Pico powers up.
+The initial quiet calibration runs again on each power-up. Only the optional
+level correction remains in `mic_level_cal.json` on the Pico.
+
+### Chrome on Android web app
+
+`webusb_demo.html` is a standalone receiver and simple compass display that
+can be adapted into an existing web app. Host it over **HTTPS** and open it in
+Chrome on the phone. Connect the Pico to the phone with a USB-C-to-micro-USB
+data cable, keep the microphones quiet for five seconds after plugging it in,
+then tap **Connect Pico** and approve Chrome's USB access prompt. Make a sound
+near one mic and pause to produce an event. The page parses only `SND1 ` lines
+and emits a `pico-sound` browser event containing the parsed JSON for reuse by
+another UI. It clears the arrow after 2.5 seconds and never shows an angle for
+a clipped or ambiguous event.
+
+Android Chrome does not provide the normal desktop Web Serial API. This demo
+uses WebUSB directly with the Pico MicroPython USB CDC device (VID `0x2E8A`,
+PID `0x0005`). The WebUSB permission picker must be opened by a user tap. This
+USB path has not yet been tested with the specific phone and Pico firmware;
+if Chrome does not expose the device, a native Android USB bridge or a wireless
+ESP32 link would be the next option. The webpage and Pico must have exclusive
+use of the connection; disconnect Thonny before connecting the phone.
+
+The angle is a *rough sound-level direction*, not a measured arrival angle.
+The Pico reads its ADC channels in quick succession rather than simultaneously.
+The MAX9814 changes gain automatically, so it can distort sound-level
+comparisons with the two MAX4466 modules. Reflections from walls and a sound
+source far from a small microphone array can also make the result ambiguous.
+Treat these outputs as a prototype test, not reliable navigation information.
+`all_sensors_test.py` remains available for raw per-mic diagnostics.
+For the ESP32-WROOM-32 Bluetooth bridge, see `../esp32/SETUP.md`.
+
+### Add the rear LM393 module
+
+Unplug power before wiring. Keep the existing analog microphones on GP26,
+GP27, and GP28. A Pico exposes only those three external ADC inputs, so this
+LM393 uses its digital threshold output (`DO`) on GP22. Leave `AO` unconnected.
+Follow the labels printed on your module; pin order varies.
+
+| LM393 label | Pico connection | Physical pin |
+| --- | --- | --- |
+| VCC / + | Shared 3V3(OUT) rail | 36 |
+| GND / - | Shared ground rail (AGND is fine) | 33 |
+| DO | GP22 | 29 |
+
+Power the LM393 at **3.3 V** so its output is safe for the Pico GPIO. Never
+connect a module powered at 5 V directly to GP22. Split the Pico's single
+3V3(OUT) pin through the same rail as the other mics. Check that this rail
+does not sag when all four modules are on.
+
+1. Run `rear_sensor_test.py` in Thonny with the hat mounted. Keep quiet, then
+   make several short sounds behind the hat at the distance you care about.
+   Watch `falling edges` and `rising edges`; short pulses count even when the
+   printed `DO level` returns to idle before the next line.
+2. Adjust the LM393 trim pot in small steps until quiet gives no new edges
+   and the behind-the-hat test produces repeatable edges. If it cannot meet
+   both conditions, the obstruction or sensor threshold limits this setup.
+   The pot changes the **digital threshold**, not a measured loudness value.
+3. Note the quiet `DO level`. Set `REAR_ACTIVE_LEVEL` in `direction_test.py`
+   to the **opposite** level (1 when quiet is 0; 0 when quiet is 1). Then run
+   `direction_test.py`. A rear-only sound should print `rear_possible`; if an
+   analog mic also reacts, its event should print `rear yes` and contain
+   `"rear_triggered": true`. If the rear pulse count rises in quiet, tighten
+   the threshold or check wiring. Save the updated `direction_test.py` on
+   the Pico before using its `main.py` at startup.
+
+The LM393 provides only a yes/no threshold crossing. A short rear pulse is
+held by a GPIO interrupt, debounced for 80 ms, and joined to an analog event
+within 250 ms. When joined, it adds a small vote at 180° equal to 35% of the
+strongest analog score. This is deliberately weak because the module has no
+comparable loudness value. A rear-only pulse displays **possible sound behind**
+without an angle. Sound blocked by the hat may fail to trigger it; unrelated
+nearby sounds can also trigger it. Check results from front, sides, and rear
+at the same distance before relying on any cue.
+
+### How the Pico cleans and combines the signals
+
+The Pico interleaves 128 samples from each analog microphone per frame. For
+each mic, it subtracts that frame's average DC offset and computes RMS sound
+level (`sqrt(mean(sample²) - mean(sample)²)`). At startup, five quiet seconds
+give each mic its own median and 90th-percentile noise levels. An analog event
+starts when a frame crosses that mic's trigger: the larger of 1.8 times its
+quiet 90th percentile or 800 ADC counts above its quiet median. The code
+subtracts the quiet level and divides by that mic's quiet-to-trigger gap, then
+applies any saved level correction. It keeps the largest score for each mic
+during the event and reports after 180 ms below all triggers.
+
+Direction is the weighted sum of the microphones' unit vectors at their
+configured angles. A joined rear trigger adds the weak 180° vote described
+above. `atan2` turns that vector into a clockwise angle; vector length divided
+by total score is the `separation` heuristic. Below 0.35, the angle is marked
+ambiguous. A channel near an ADC rail for at least 5% of a frame marks the
+event clipped and hides the angle. There is no frequency filter, sound-type
+classifier, time-of-arrival measurement, or true triangulation in this code.
+
+## Hardware
+
+Use a Pico with soldered headers (or properly soldered wires), a USB data cable,
+one GY-MAX4466 microphone module, and three jumper wires. A breadboard helps.
+Loose pins pushed through unsoldered holes do not make dependable connections.
+
+Unplug USB before wiring. Follow the sensor's printed labels, not its pin order.
+
+| GY-MAX4466 label | Pico label | Physical pin |
+| --- | --- | --- |
+| VCC / + | 3V3 OUT | 36 |
+| GND / - | AGND | 33 |
+| OUT | GP26 / ADC0 | 31 |
+
+If testing an LM393 module instead, connect its AO pin to GP26 and leave DO
+disconnected. Use 3.3 V for either module in this test. Do not power the sensor
+from VBUS/5 V while connecting its output directly: Pico analog inputs must
+remain between 0 and 3.3 V.
+
+### Connect three GY-MAX4466 microphones
+
+The Pico has one `3V3(OUT)` pin. Split it through a breadboard power rail or a
+small 3-way connector. Do the same for ground. Some breadboards split their
+long power rails in the middle; bridge the split if using both halves. Keep
+each microphone's OUT wire separate.
+
+| Connection | Microphone 1 | Microphone 2 | Microphone 3 |
+| --- | --- | --- | --- |
+| VCC | Shared 3.3 V rail from Pico pin 36 | Same rail | Same rail |
+| GND | Shared ground rail from Pico AGND pin 33 | Same rail | Same rail |
+| OUT | GP26 / pin 31 | GP27 / pin 32 | GP28 / pin 34 |
+
+Unplug the Pico before changing wiring. Use `3V3(OUT)`, not `VBUS` (5 V),
+`3V3_EN`, or `ADC_VREF`. The current `sensor_test.py` reads only GP26; it
+checks microphone 1 and does not yet measure direction.
+
+## Open Thonny
+
+Double-click `Open Thonny for Pico.cmd` in the project folder. It opens the
+saved test and selects the Pico interpreter and its current COM3 port.
+If a first-run dialog appears, accept the default language/settings.
+
+## Install MicroPython on the Pico if needed
+
+1. Read the board label: Pico/Pico H, Pico W, Pico 2, or Pico 2 W.
+2. Download the stable UF2 for that exact model from the official page below.
+   Pico H uses Pico firmware; Pico WH uses Pico W firmware.
+3. Hold BOOTSEL while connecting USB to the computer, then release it.
+4. The original Pico appears as RPI-RP2; Pico 2 appears as RP2350.
+5. Copy the matching UF2 onto that drive. The drive disappears as the board
+   restarts. That is expected. Installing firmware replaces the running program;
+   preserve any existing board code you need before doing this.
+6. Subsequent normal connections do not require BOOTSEL.
+
+Official firmware/setup: https://www.raspberrypi.com/documentation/microcontrollers/micropython.html
+
+## Select the Pico and run
+
+1. In Thonny, open Tools > Options > Interpreter (or the interpreter selector
+   at the bottom right) if the Pico is not connected automatically.
+2. Select MicroPython (RP2040), then its USB serial/COM port. COM3 was detected
+   for the Pico in the current setup; the port can change after reconnecting.
+3. Click Stop/Restart if needed. The Shell should show a MicroPython banner
+   or respond to `print("Pico connected")`.
+4. Open `hardware/pico/sensor_test.py` from this computer if it is not open.
+5. Press F5 or the green Run button. Keep the source file saved on this computer;
+   Thonny sends it to the Pico to execute. Do not name it main.py yet.
+6. Press Stop or Ctrl+C to stop the test.
+
+## Test and interpret
+
+Record several output lines for each condition, without touching the board:
+
+1. Quiet for 10 seconds.
+2. Normal speech from 20-30 cm.
+3. Normal speech from 1 metre.
+4. Several claps from 1 metre. Bursts have gaps, so a clap may be missed.
+
+For the GY-MAX4466, start with the gain adjustment near its middle. Turn it
+gently in small steps while repeating the tests. Aim for speech readings clearly
+above quiet readings without frequent Near limits readings. Stop turning the
+adjustment screw when it reaches resistance.
+
+Sound is the changing portion of the electrical signal in millivolts, not
+calibrated acoustic decibels. Speech should repeatedly exceed the quiet baseline.
+Average is the resting voltage; it need not be 1.65 V. A large Near limits
+percentage suggests little headroom or possible clipping.
+
+Repeat with the other modules one at a time using identical wiring and placement.
+Passing this check does not establish waveform quality or localization accuracy.
+The next step is a recording with controlled sampling.
+
+## Troubleshooting
+
+- `No module named machine`: select MicroPython (RP2040), not local Python.
+  Do not try to pip-install machine.
+- No board or COM port: try another data cable and USB port, then verify firmware
+  and close other apps using the serial port.
+- RPI-RP2 is visible but no COM port: the Pico is in firmware-loading mode.
+- Flat readings: check OUT (or LM393 AO), power, ground, and soldered connections.
+- On a GY-MAX4466 the adjustment screw changes microphone gain. On common LM393
+  boards it mainly adjusts the digital threshold.
+
+References:
+- https://thonny.org/
+- https://datasheets.raspberrypi.com/pico/Pico-2-Pinout.pdf
+- https://docs.micropython.org/en/v1.26.0/rp2/quickref.html
+- https://learn.adafruit.com/adafruit-microphone-amplifier-breakout/overview
+- https://sensorkit.joy-it.net/en/sensors/ky-038
