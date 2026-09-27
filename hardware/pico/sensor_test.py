@@ -1,8 +1,9 @@
-"""Run in Thonny with the MicroPython (Raspberry Pi Pico) interpreter.
+"""Run in Thonny with the MicroPython (RP2040) interpreter.
 
-One sensor: VCC -> 3V3 OUT (36), GND -> AGND (33), AO -> GP26 (31).
-DO stays disconnected. This is a signal-response check, not a timed
-audio recording or a sound-direction measurement.
+One GY-MAX4466: VCC -> 3V3 OUT (36), GND -> AGND (33),
+OUT -> GP26/ADC0 (31). This is a signal-response check, not a timed
+audio recording or a sound-direction measurement. An LM393 module
+can be checked the same way using its AO pin instead of OUT.
 """
 
 from machine import ADC, Pin
@@ -14,7 +15,7 @@ mic = ADC(Pin(26))
 samples = array("H", [0] * 2048)
 volts_per_count = 3.3 / 65535
 
-print("Sound test running. Press Stop or Ctrl+C to finish.")
+print("Analog microphone test running. Press Stop or Ctrl+C to finish.")
 print("Try 10 seconds quiet, speech at 30 cm, then speech at 1 metre.")
 
 try:

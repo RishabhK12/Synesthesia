@@ -3,3 +3,6 @@
 /diagnostic-data/
 /compass-data/
 /.tools/
+/.cxx/
+/.gradle/
+/.gradle-user/
