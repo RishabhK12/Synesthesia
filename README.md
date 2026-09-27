@@ -1,28 +1,52 @@
 # Synesthesia
 
-An experimental sound display for a Samsung S23 Ultra. The Pico estimates a rough bearing from three analog microphone modules and an optional rear LM393 threshold sensor. The ESP32-WROOM-32 relays direction events over Bluetooth Low Energy (BLE). The [phone page](web/index.html) uses the phone microphone to classify sound with a bundled YAMNet model, then shows a visual cue. It can also watch for a saved name using Chrome's **on-device** speech recognition when that feature is available.
+**See the sounds around you.**
 
-The page has no WebSocket client, simulator, or application server. It is a static site; an HTTPS host such as GitHub Pages is needed to open it in Chrome on the phone and use Web Bluetooth and the microphone. Audio never goes to the Pico, ESP32, or a project server. Name recognition is disabled if Chrome cannot process speech locally.
+Synesthesia is a visual sound-awareness prototype for Deaf and hard-of-hearing people. It explores how an AR headset could make nearby sounds easier to notice and understand: a siren appears in the direction it came from, a knock becomes a visible pulse, and someone calling your name becomes a clear alert. The goal is to support awareness and connection with the surrounding world through sight and touch.
 
-## Hardware
+The current demonstration runs in a phone browser as a preview of that headset experience. An optional camera view places the cues over a live scene. AR glasses are the intended future display; they are not required to explore the visual design today.
 
-- [Pico wiring, calibration, and tests](hardware/pico/SETUP.md)
-- [Pico to ESP32 wiring and BLE test](hardware/esp32/SETUP.md)
+## What the wearer would see
 
-Save `hardware/pico/direction_test.py` and `hardware/pico/main.py` on the Pico. Save `hardware/esp32/ble_bridge.py` and `hardware/esp32/main.py` on the ESP32. Each board is powered from its own USB port. Connect Pico GP0 to ESP32 GPIO16 and connect their grounds. Do not connect their power pins together. Follow the linked guides to verify each stage before using the phone page.
+| Sound | Visual cue |
+| --- | --- |
+| A siren to the right | A red-and-blue wave grows on the right edge of the view. |
+| A knock ahead | A short, focused pulse appears toward the front. |
+| Someone says the saved name | A prominent name cue appears, with vibration when supported. |
+| A possible sound behind | A lower-edge glow warns that the rear sensor fired; its exact direction remains unknown. |
 
-## Phone setup
+Colors, icons, shapes, and motion distinguish sound categories. When the system recognizes a sound but cannot locate it, the display shows its label without claiming a direction.
 
-1. Publish `web/` as a **static HTTPS site**. After this branch is merged into the repository's default branch, enable **Settings → Pages → Build and deployment → GitHub Actions**, then run the **Publish phone page** workflow from the Actions tab. GitHub requires a manually run workflow to exist on the default branch. The page will be at your repository's Pages URL. Hosting files is the only web service involved; there is no live data server.
-2. On the S23 Ultra, open that URL in **Chrome**. Enter your name and optionally two nicknames or pronunciation spellings, then tap **Save name**. These values stay in that browser's local storage.
-3. Power the Pico and ESP32. Allow the Pico five quiet seconds to measure its background. Tap **Connect**, choose **SynDir**, and grant Bluetooth access. Chrome requires this tap for each connection; reloads may disconnect it.
-4. Tap **Start** to classify sound using the phone microphone. Name alerts start at the same time if local recognition and its English language pack are available. Chrome may offer to download that pack. The **Name alerts** row reports whether it is listening or unavailable. If it is unavailable, other sound classification still works. Chrome must remain open and active for continuous cues.
-5. Test with a helper: say the saved name, clap once directly ahead of the rig, and then from each side, leaving a quiet gap between tests. Compare the **Latest cue** with the known direction. In **Sensor setup and diagnostics**, set the rig-front angle offset if the rig points away from the back camera. Test multiple rooms and distances; reflected sound and the MAX9814's automatic gain can shift the result.
+## How it works
 
-The two detection paths are separate: YAMNet classifies sound types; Chrome's local speech recognizer listens for the saved name. The older `audio_classification` Android branch uses a sherpa-onnx keyword model instead. Browser name recognition is an experimental substitute and depends on Chrome's support on the specific phone. A direction is attached only if a single plausible BLE event and a single phone recognition occur close together. With simultaneous sounds or uncertain sensor readings, the cue shows an unknown direction. The rear LM393 supplies a possible-behind hint, not a precise bearing. **Do not rely on this prototype for safety-critical alerts or navigation.**
+```mermaid
+flowchart LR
+    A[Three microphones + rear sound sensor] --> B[Raspberry Pi Pico<br/>rough direction]
+    B -->|UART event| C[ESP32<br/>Bluetooth Low Energy]
+    C -->|direction event| D[Browser demonstration]
+    E[Device microphone] -->|audio stays on device| F[YAMNet sound classification<br/>optional local name recognition]
+    F --> D
+    D --> G[Visual sound cues + vibration]
+```
 
-## Development checks
+The Pico reads two MAX4466 modules and one MAX9814 module, with an optional rear LM393 threshold sensor. It calibrates the background sound level, compares microphone activity, and estimates one rough bearing. The ESP32-WROOM-32 forwards that event over Bluetooth. The browser uses its own microphone and a bundled **YAMNet** model through **MediaPipe Tasks Audio** to identify sound types. Where supported, Chrome's on-device speech recognition checks for a name and up to two nicknames entered beforehand. The browser pairs sound types and direction events that occur close together and renders the result as an animated halo.
 
-Run `node --test web/web.test.mjs` to check packet decoding, direction matching, and name matching. To inspect the page on a computer, serve `web/` over `http://localhost` using any simple static file server; this is only for local development. A plain `file://` URL does not provide the secure browser features used by the phone page. No build step is required for the static site.
+Only compact direction events travel over Bluetooth. Sound classification runs on the device. The site is static: it needs HTTPS hosting for browser permissions, with no WebSocket connection or live application server.
 
-The previous Android-only experiment remains in Git history and in the `audio_classification` branch. `web/vendor/NOTICES.md` lists bundled model and runtime licenses.
+## Run the demonstration
+
+1. Follow the [Pico setup](hardware/pico/SETUP.md) and [ESP32 setup](hardware/esp32/SETUP.md) to wire, calibrate, and test the sensor rig. Each board uses its own USB power connection; the boards share a ground and a Pico-to-ESP32 UART data wire.
+2. Publish the [`web/` folder](web/) as a static HTTPS site. A [GitHub Pages workflow](.github/workflows/pages.yml) is included. In the repository's Pages settings, select **GitHub Actions** as the build source, then run **Publish phone page** from the Actions tab.
+3. Open the site in Chrome on an Android phone. Save a name if you want name alerts. Power the sensor rig and leave it quiet for five seconds while the Pico measures its background.
+4. Tap **Connect**, choose **SynDir**, and allow Bluetooth access. Tap **Start** to enable sound classification. The Name alerts row reports whether local name recognition is available. **Show** enables the optional camera background.
+5. With a helper, make one sound at a time from known positions around the rig. Compare the displayed cue with the actual position. Use the rig-front offset in **Sensor setup and diagnostics** if the array and camera face different directions.
+
+The previous Android-only experiment is preserved in Git history and the `audio_classification` branch. The browser uses the same YAMNet model for general sound classification; the Android branch uses a separate sherpa-onnx keyword model for names. [Bundled model and runtime notices](web/vendor/NOTICES.md) are included with the site.
+
+## Current limits
+
+This is a prototype of an AR sound display, not a tested headset or a safety device. Its bearing comes from relative sound levels, so echoes, obstructions, microphone gain, and overlapping sounds can change the result. The rear LM393 provides only a possible-behind hint. A sound type and direction can be paired incorrectly when several sounds happen close together. Name recognition depends on local speech support in the browser; it does not switch to a cloud recognizer.
+
+## Development
+
+The firmware uses MicroPython on the Pico and ESP32. The display is plain HTML, CSS, and JavaScript with Canvas graphics; MediaPipe runs YAMNet locally through WebAssembly. Run `node --test web/web.test.mjs` for the browser logic checks. Hardware fusion checks are in `hardware/tests/`.
