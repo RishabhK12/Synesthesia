@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.hackgt.behindalert"
-    android:versionCode="2"
-    android:versionName="2.0">
+    android:versionCode="5"
+    android:versionName="2.3-speech">
 
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
 
@@ -13,6 +13,16 @@
     <application
         android:label="Sound Direction"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity
+            android:name=".CompassActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize" />
+        <activity
+            android:name=".DiagnosticActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="orientation|screenSize" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

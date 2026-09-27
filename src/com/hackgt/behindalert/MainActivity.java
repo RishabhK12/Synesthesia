@@ -3,6 +3,7 @@ package com.hackgt.behindalert;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Canvas;
@@ -129,6 +130,14 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         TextView title = text(col, "Left / Right Sound Test", 22, COL_FG); title.setTypeface(null, Typeface.BOLD);
+        button(col, "Microphone test (start here)", v -> {
+            stopAudio();
+            startActivity(new Intent(this, DiagnosticActivity.class));
+        });
+        button(col, "360° sound compass", v -> {
+            stopAudio();
+            startActivity(new Intent(this, CompassActivity.class));
+        });
         text(col, "Mount the phone flat with its length running ear-to-ear (one mic by each ear). Calibrate once, then every sound is labelled LEFT, middle or RIGHT.", 13, COL_MUT);
 
         // --- start ---
