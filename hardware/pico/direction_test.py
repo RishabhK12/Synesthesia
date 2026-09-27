@@ -1,4 +1,4 @@
-"""Experimental three-microphone direction test for Raspberry Pi Pico.
+"""Experimental direction test for three analog mics and one rear LM393.
 
 Run from Thonny or install as main.py on Pico. Sound events are printed as
 SND1-prefixed JSON lines over the Pico's USB serial connection. No network
@@ -16,6 +16,14 @@ import time
 NAMES = ("GP26 MAX4466", "GP27 MAX9814", "GP28 MAX4466")
 PINS = (26, 27, 28)
 ANGLES = (0, 120, 240)  # front, right, left
+REAR_PIN = 22  # LM393 DO; Pico physical pin 29 (AO is not connected)
+REAR_ANGLE = 180
+# Most KY-038-style boards assert DO high; change to 0 if your test shows
+# that DO goes low when the rear sensor detects a sound.
+REAR_ACTIVE_LEVEL = 1
+REAR_JOIN_MS = 250  # associate a rear pulse with a nearby analog event
+REAR_DEBOUNCE_MS = 80
+REAR_VOTE_FRACTION = 0.35  # deliberately weak: DO supplies no loudness
 
 SAMPLES_PER_FRAME = 128  # each mic is sampled once per pass
 QUIET_CALIBRATION_MS = 5000
@@ -152,8 +160,9 @@ def calibrate_levels(adcs, quiet_high, trigger):
     return scales
 
 
-def direction_from_scores(scores):
-    total = sum(scores)
+def direction_from_scores(scores, rear_triggered=False):
+    rear_score = max(scores) * REAR_VOTE_FRACTION if rear_triggered else 0.0
+    total = sum(scores) + rear_score
     if total <= 0:
         return None, 0.0
 
@@ -163,6 +172,10 @@ def direction_from_scores(scores):
         radians = ANGLES[i] * math.pi / 180.0
         right += scores[i] * math.sin(radians)
         front += scores[i] * math.cos(radians)
+    if rear_score:
+        radians = REAR_ANGLE * math.pi / 180.0
+        right += rear_score * math.sin(radians)
+        front += rear_score * math.cos(radians)
 
     strength = math.sqrt(right * right + front * front) / total
     if strength < MIN_VECTOR_STRENGTH:
@@ -171,12 +184,32 @@ def direction_from_scores(scores):
     return (angle + 360.0) % 360.0, strength
 
 
-def describe_event(peak_scores, peak_rms, peak_clip, uart=None):
-    angle, strength = direction_from_scores(peak_scores)
-    strongest = 0
-    for i in range(1, 3):
-        if peak_scores[i] > peak_scores[strongest]:
-            strongest = i
+def send_event(event, uart=None):
+    # The phone/web reader ignores all other printed diagnostic lines.
+    line = "SND1 " + json.dumps(event)
+    print(line)
+    if uart is not None:
+        uart.write(line + "\n")
+
+
+def describe_rear_only_event(uart=None):
+    print("EVENT: possible sound behind (rear LM393 only; direction uncertain)")
+    send_event({
+        "v": 1,
+        "type": "sound_direction",
+        "angle_deg": None,
+        "separation": 0.0,
+        "status": "rear_possible",
+        "clipped": False,
+        "rear_triggered": True,
+        "peak_rms": [0, 0, 0],
+        "t_ms": time.ticks_ms(),
+    }, uart)
+
+
+def describe_event(peak_scores, peak_rms, peak_clip, uart=None,
+                   rear_triggered=False):
+    angle, strength = direction_from_scores(peak_scores, rear_triggered)
     clipped = max(peak_clip) >= 5.0
     if clipped:
         print("CLIPPED: lower gain or move the sound farther away.")
@@ -190,31 +223,44 @@ def describe_event(peak_scores, peak_rms, peak_clip, uart=None):
     if angle is None:
         label = "uncertain direction"
     else:
-        label = "roughly %.0f degrees toward %s" % (angle, NAMES[strongest])
+        label = "roughly %.0f degrees" % angle
     print(
-        "EVENT: %s | separation %.2f | peak RMS %d/%d/%d | clip %d/%d/%d%%"
+        "EVENT: %s | separation %.2f | peak RMS %d/%d/%d | clip %d/%d/%d%% | rear %s"
         % (
             label,
             strength,
             peak_rms[0], peak_rms[1], peak_rms[2],
             peak_clip[0], peak_clip[1], peak_clip[2],
+            "yes" if rear_triggered else "no",
         )
     )
-    # The phone/web reader should ignore all other printed diagnostic lines.
     # One complete SND1 line is one event; angle is clockwise from rig front.
-    line = "SND1 " + json.dumps({
+    send_event({
         "v": 1,
         "type": "sound_direction",
         "angle_deg": None if angle is None else round(angle, 1),
         "separation": round(strength, 3),
         "status": status,
         "clipped": clipped,
+        "rear_triggered": rear_triggered,
         "peak_rms": [int(value) for value in peak_rms],
         "t_ms": time.ticks_ms(),
-    })
-    print(line)
-    if uart is not None:
-        uart.write(line + "\n")
+    }, uart)
+
+
+class RearTrigger:
+    """Latch short LM393 digital pulses while the ADC loop is sampling."""
+
+    def __init__(self):
+        idle_pull = Pin.PULL_DOWN if REAR_ACTIVE_LEVEL else Pin.PULL_UP
+        self.pin = Pin(REAR_PIN, Pin.IN, idle_pull)
+        self.count = 0
+        edge = Pin.IRQ_RISING if REAR_ACTIVE_LEVEL else Pin.IRQ_FALLING
+        self.pin.irq(trigger=edge, handler=self._on_edge)
+
+    def _on_edge(self, pin):
+        # Keep the interrupt handler tiny; process its count in the main loop.
+        self.count += 1
 
 
 def main():
@@ -225,6 +271,11 @@ def main():
         scales = calibrate_levels(adcs, quiet_high, trigger)
     else:
         scales = load_level_scales()
+    rear = RearTrigger()
+    print("Rear LM393 DO on GP%d: idle level %d, active level %d" %
+          (REAR_PIN, rear.pin.value(), REAR_ACTIVE_LEVEL))
+    if rear.pin.value() == REAR_ACTIVE_LEVEL:
+        print("Rear DO is active in quiet; adjust its trim pot or check polarity.")
     print("Ready. Make a short sound at one position, then pause.")
     event_active = False
     peak_scores = [0.0, 0.0, 0.0]
@@ -232,6 +283,11 @@ def main():
     peak_clip = [0.0, 0.0, 0.0]
     last_loud_ms = time.ticks_ms()
     last_report_ms = last_loud_ms
+    rear_seen_count = rear.count
+    rear_accepted = 0
+    last_rear_ms = None
+    rear_pending_ms = None
+    event_rear = False
 
     try:
         while True:
@@ -239,7 +295,25 @@ def main():
             now = time.ticks_ms()
             loud = any(rms[i] >= trigger[i] for i in range(3))
 
+            if rear.count != rear_seen_count:
+                rear_seen_count = rear.count
+                if last_rear_ms is None or time.ticks_diff(now, last_rear_ms) >= REAR_DEBOUNCE_MS:
+                    last_rear_ms = now
+                    rear_accepted += 1
+                    if event_active:
+                        event_rear = True
+                    else:
+                        rear_pending_ms = now
+
+            if (rear_pending_ms is not None and not event_active and
+                    time.ticks_diff(now, rear_pending_ms) >= REAR_JOIN_MS):
+                describe_rear_only_event(uart)
+                rear_pending_ms = None
+
             if loud:
+                if not event_active:
+                    event_rear = rear_pending_ms is not None
+                    rear_pending_ms = None
                 event_active = True
                 last_loud_ms = now
                 for i in range(3):
@@ -251,16 +325,19 @@ def main():
                     peak_clip[i] = max(peak_clip[i], clip[i])
 
             if event_active and time.ticks_diff(now, last_loud_ms) >= EVENT_END_MS:
-                describe_event(peak_scores, peak_rms, peak_clip, uart)
+                describe_event(peak_scores, peak_rms, peak_clip, uart,
+                               rear_triggered=event_rear)
                 event_active = False
+                event_rear = False
                 peak_scores = [0.0, 0.0, 0.0]
                 peak_rms = [0.0, 0.0, 0.0]
                 peak_clip = [0.0, 0.0, 0.0]
 
             if time.ticks_diff(now, last_report_ms) >= REPORT_EVERY_MS:
                 print(
-                    "RMS %d/%d/%d (triggers %d/%d/%d)"
-                    % (rms[0], rms[1], rms[2], trigger[0], trigger[1], trigger[2])
+                    "RMS %d/%d/%d (triggers %d/%d/%d) | rear DO %d, pulses %d"
+                    % (rms[0], rms[1], rms[2], trigger[0], trigger[1], trigger[2],
+                       rear.pin.value(), rear_accepted)
                 )
                 last_report_ms = now
     except KeyboardInterrupt:

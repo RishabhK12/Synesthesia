@@ -44,11 +44,15 @@
         arrow.style.transform = `rotate(${angle}deg)`;
         arrow.style.display = "block";
         cue.textContent = `Sound at about ${Math.round(angle)}°`;
-        details.textContent = `Direction separation: ${Number(event.separation).toFixed(2)}`;
+        details.textContent = `Direction separation: ${Number(event.separation).toFixed(2)}${event.rear_triggered ? " · rear sensor also triggered" : ""}`;
+      } else if (event.status === "rear_possible") {
+        arrow.style.display = "none";
+        cue.textContent = "Possible sound behind";
+        details.textContent = "Only the rear threshold sensor triggered; direction is uncertain.";
       } else {
         arrow.style.display = "none";
         cue.textContent = "Direction unclear";
-        details.textContent = event.status === "clipped" ? "Sound was too loud for a reliable reading." : "The microphones did not agree on one direction.";
+        details.textContent = (event.status === "clipped" ? "Sound was too loud for a reliable reading." : "The microphones did not agree on one direction.") + (event.rear_triggered ? " Rear sensor also triggered." : "");
       }
       // Your own web app can listen for this event and draw its own cue.
       window.dispatchEvent(new CustomEvent("pico-sound", { detail: event }));

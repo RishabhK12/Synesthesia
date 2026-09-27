@@ -21,7 +21,8 @@ SERVICES = ((SERVICE_UUID, (EVENT_CHARACTERISTIC,)),)
 
 IRQ_CENTRAL_CONNECT = 1
 IRQ_CENTRAL_DISCONNECT = 2
-STATUS_CODES = {"ok": 0, "ambiguous": 1, "clipped": 2}
+STATUS_CODES = {"ok": 0, "ambiguous": 1, "clipped": 2, "rear_possible": 3}
+REAR_FLAG = 0x80
 
 
 def advertising_data():
@@ -35,12 +36,17 @@ def advertising_data():
 
 
 def encode_event(event, sequence):
-    """Six bytes: version, status, angle*10 LE, separation*100, sequence."""
+    """Six bytes: version, status plus rear bit, angle, separation, sequence."""
     if not isinstance(event, dict):
         raise ValueError("event must be an object")
     if event.get("v") != 1 or event.get("type") != "sound_direction":
         raise ValueError("unsupported event")
     status = STATUS_CODES[event["status"]]
+    rear_triggered = event.get("rear_triggered", False)
+    if not isinstance(rear_triggered, bool):
+        raise ValueError("invalid rear flag")
+    if status == 3 and not rear_triggered:
+        raise ValueError("rear-only status needs rear flag")
     angle = event.get("angle_deg")
     if status == 0:
         if not isinstance(angle, (int, float)) or not 0 <= angle < 360:
@@ -54,7 +60,7 @@ def encode_event(event, sequence):
     if not isinstance(separation, (int, float)) or not 0 <= separation <= 1:
         raise ValueError("invalid separation")
     return struct.pack(
-        "<BBHBB", 1, status, angle_tenths,
+        "<BBHBB", 1, status | (REAR_FLAG if rear_triggered else 0), angle_tenths,
         min(100, int(round(separation * 100))), sequence & 0xFF,
     )
 

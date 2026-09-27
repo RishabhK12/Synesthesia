@@ -8,7 +8,7 @@
 - The test uses only built-in MicroPython modules. No pip packages, Arduino IDE,
   ESP32 setup, or phone software are needed for this stage.
 
-## Experimental three-microphone direction test
+## Experimental direction test
 
 Run `hardware/pico/direction_test.py` in Thonny. `Open Thonny for Pico.cmd`
 opens this file. It uses GP26 for MAX4466, GP27 for MAX9814, and GP28 for
@@ -19,7 +19,8 @@ Mount the microphones apart on a rigid frame. At the top of the script, set
 `ANGLES` to their real positions, measured clockwise from the front. The
 default `(0, 120, 240)` means GP26 is front, GP27 is right, GP28 is left.
 If they are close together on a breadboard, sound level alone will give little
-direction information.
+direction information. An optional rear LM393 adds a threshold cue on GP22;
+see the wiring and test steps below.
 
 1. Start with 5 seconds of normal quiet. The script measures each mic's quiet
    RMS level and sets a separate event trigger. Keep hands away from the wires.
@@ -58,7 +59,9 @@ receiver can ignore the human-readable test lines and parse only complete
 `SND1 ` lines. `angle_deg` is clockwise from the rig's front; it is `null`
 when the event is ambiguous or clipped. `separation` is a rough geometric
 score from 0 to 1, not a calibrated probability. `status` is `ok`,
-`ambiguous`, or `clipped`. `peak_rms` lists GP26/GP27/GP28 readings; `t_ms`
+`ambiguous`, `clipped`, or `rear_possible`. The last status means only the rear
+LM393 fired, so it does not claim an angle. `rear_triggered` says whether the
+rear sensor joined an analog event. `peak_rms` lists GP26/GP27/GP28 readings; `t_ms`
 is the Pico's uptime in milliseconds. No sound waveform is sent.
 
 For USB use without Thonny, save both `direction_test.py` and `main.py` from
@@ -97,6 +100,69 @@ source far from a small microphone array can also make the result ambiguous.
 Treat these outputs as a prototype test, not reliable navigation information.
 `all_sensors_test.py` remains available for raw per-mic diagnostics.
 For the ESP32-WROOM-32 Bluetooth bridge, see `../esp32/SETUP.md`.
+
+### Add the rear LM393 module
+
+Unplug power before wiring. Keep the existing analog microphones on GP26,
+GP27, and GP28. A Pico exposes only those three external ADC inputs, so this
+LM393 uses its digital threshold output (`DO`) on GP22. Leave `AO` unconnected.
+Follow the labels printed on your module; pin order varies.
+
+| LM393 label | Pico connection | Physical pin |
+| --- | --- | --- |
+| VCC / + | Shared 3V3(OUT) rail | 36 |
+| GND / - | Shared ground rail (AGND is fine) | 33 |
+| DO | GP22 | 29 |
+
+Power the LM393 at **3.3 V** so its output is safe for the Pico GPIO. Never
+connect a module powered at 5 V directly to GP22. Split the Pico's single
+3V3(OUT) pin through the same rail as the other mics. Check that this rail
+does not sag when all four modules are on.
+
+1. Run `rear_sensor_test.py` in Thonny with the hat mounted. Keep quiet, then
+   make several short sounds behind the hat at the distance you care about.
+   Watch `falling edges` and `rising edges`; short pulses count even when the
+   printed `DO level` returns to idle before the next line.
+2. Adjust the LM393 trim pot in small steps until quiet gives no new edges
+   and the behind-the-hat test produces repeatable edges. If it cannot meet
+   both conditions, the obstruction or sensor threshold limits this setup.
+   The pot changes the **digital threshold**, not a measured loudness value.
+3. Note the quiet `DO level`. Set `REAR_ACTIVE_LEVEL` in `direction_test.py`
+   to the **opposite** level (1 when quiet is 0; 0 when quiet is 1). Then run
+   `direction_test.py`. A rear-only sound should print `rear_possible`; if an
+   analog mic also reacts, its event should print `rear yes` and contain
+   `"rear_triggered": true`. If the rear pulse count rises in quiet, tighten
+   the threshold or check wiring. Save the updated `direction_test.py` on
+   the Pico before using its `main.py` at startup.
+
+The LM393 provides only a yes/no threshold crossing. A short rear pulse is
+held by a GPIO interrupt, debounced for 80 ms, and joined to an analog event
+within 250 ms. When joined, it adds a small vote at 180° equal to 35% of the
+strongest analog score. This is deliberately weak because the module has no
+comparable loudness value. A rear-only pulse displays **possible sound behind**
+without an angle. Sound blocked by the hat may fail to trigger it; unrelated
+nearby sounds can also trigger it. Check results from front, sides, and rear
+at the same distance before relying on any cue.
+
+### How the Pico cleans and combines the signals
+
+The Pico interleaves 128 samples from each analog microphone per frame. For
+each mic, it subtracts that frame's average DC offset and computes RMS sound
+level (`sqrt(mean(sample²) - mean(sample)²)`). At startup, five quiet seconds
+give each mic its own median and 90th-percentile noise levels. An analog event
+starts when a frame crosses that mic's trigger: the larger of 1.8 times its
+quiet 90th percentile or 800 ADC counts above its quiet median. The code
+subtracts the quiet level and divides by that mic's quiet-to-trigger gap, then
+applies any saved level correction. It keeps the largest score for each mic
+during the event and reports after 180 ms below all triggers.
+
+Direction is the weighted sum of the microphones' unit vectors at their
+configured angles. A joined rear trigger adds the weak 180° vote described
+above. `atan2` turns that vector into a clockwise angle; vector length divided
+by total score is the `separation` heuristic. Below 0.35, the angle is marked
+ambiguous. A channel near an ADC rail for at least 5% of a frame marks the
+event clipped and hides the angle. There is no frequency filter, sound-type
+classifier, time-of-arrival measurement, or true triangulation in this code.
 
 ## Hardware
 

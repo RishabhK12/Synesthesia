@@ -1,6 +1,7 @@
 # Pico + ESP32-WROOM-32 wireless sound direction
 
-The Pico samples the three analog microphones and estimates a rough direction.
+The Pico samples three analog microphones and an optional rear LM393 digital
+sensor, then estimates a rough direction.
 It sends one `SND1` JSON line per sound event over a 3.3 V UART wire. The ESP32
 receives that line and sends a compact Bluetooth Low Energy (BLE) notification
 to Chrome on the Samsung S23 Ultra. The phone can use its own microphone to
@@ -25,8 +26,9 @@ the selected board and port.
 
 ## Wiring
 
-Unplug both boards before connecting wires. Leave the three microphones on
-Pico GP26, GP27, and GP28 as described in `../pico/SETUP.md`.
+Unplug both boards before connecting wires. Leave the three analog microphones
+on Pico GP26, GP27, and GP28. Wire the optional rear LM393 DO to Pico GP22 as
+described in `../pico/SETUP.md`. The ESP32 needs no extra sensor wire.
 
 | Pico | ESP32-WROOM-32 dev board | Needed? |
 | --- | --- | --- |
@@ -47,7 +49,8 @@ ESP32-WROOM-32 module; the RX wire is the only data wire required now.
    If no event prints, solve the mic threshold or wiring issue first.
 2. On the ESP32, run `ble_bridge.py` in Thonny. Look for `Advertising as SynDir`
    and `UART ready at 115200 baud`. Keep both boards powered and make another
-   sound. The ESP32 should print `Forwarded ok ...`, `ambiguous`, or `clipped`.
+   sound. The ESP32 should print `Forwarded ok ...`, `ambiguous`, `clipped`, or
+   `rear_possible`.
    If the Pico prints an event but ESP32 does not, check Pico GP0 to ESP32
    GPIO16, the GND wire, and the matching 115200 baud settings.
 3. Save both sets of files onto their boards and restart them from the battery
@@ -73,17 +76,22 @@ For example:
 ```js
 window.addEventListener("pico-sound", ({ detail }) => {
   if (detail.status === "ok") showDirection(detail.angle_deg);
+  else if (detail.status === "rear_possible") showPossibleSoundBehind();
   else showUncertainDirection();
 });
 ```
 
 `angle_deg` is clockwise from the mic rig's front (0° front, 90° right).
 `separation` is a heuristic from 0 to 1, not a probability. `status` is `ok`,
-`ambiguous`, or `clipped`; `angle_deg` is `null` for the last two. Each BLE
-notification is six bytes: version (1), status (0/1/2), angle in tenths of a
+`ambiguous`, `clipped`, or `rear_possible`; `angle_deg` is `null` unless status
+is `ok`. `rear_triggered` is true when the rear sensor fired near the event.
+Each BLE notification is six bytes: version (1), status (0/1/2/3) with bit 7
+set when `rear_triggered` is true, angle in tenths of a
 degree as a little-endian unsigned 16-bit number (`65535` means unknown),
 separation as 0–100, and a sequence number 0–255. The browser example turns
 this into an ordinary JavaScript object. BLE does not carry audio samples.
+If your app already decodes the status byte, update it to read bit 7
+separately and use `statusByte & 0x7f` for the status code.
 
 The BLE service UUID is `0066cf31-d07d-44cf-9a90-af6fb370f5e7`; its
 notification characteristic UUID is `e56dd748-976b-4fd1-b7cf-7e9f480f1c7a`.
