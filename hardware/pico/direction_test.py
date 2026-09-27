@@ -5,7 +5,7 @@ SND1-prefixed JSON lines over the Pico's USB serial connection. No network
 connection is used. Set ANGLES to match the actual microphone positions.
 """
 
-from machine import ADC, Pin
+from machine import ADC, Pin, UART
 import json
 import math
 import time
@@ -32,6 +32,9 @@ RUN_LEVEL_CALIBRATION = False
 CALIBRATION_FILE = "mic_level_cal.json"
 LEVEL_TEST_MS = 3500
 LEVEL_PREP_SECONDS = 4
+UART_BAUD = 115200
+UART_TX_PIN = 0  # Pico physical pin 1 -> ESP32 UART RX
+UART_RX_PIN = 1  # Pico physical pin 2; reserved for optional future commands
 
 
 def sample_frame(adcs):
@@ -168,7 +171,7 @@ def direction_from_scores(scores):
     return (angle + 360.0) % 360.0, strength
 
 
-def describe_event(peak_scores, peak_rms, peak_clip):
+def describe_event(peak_scores, peak_rms, peak_clip, uart=None):
     angle, strength = direction_from_scores(peak_scores)
     strongest = 0
     for i in range(1, 3):
@@ -199,7 +202,7 @@ def describe_event(peak_scores, peak_rms, peak_clip):
     )
     # The phone/web reader should ignore all other printed diagnostic lines.
     # One complete SND1 line is one event; angle is clockwise from rig front.
-    print("SND1 " + json.dumps({
+    line = "SND1 " + json.dumps({
         "v": 1,
         "type": "sound_direction",
         "angle_deg": None if angle is None else round(angle, 1),
@@ -208,11 +211,15 @@ def describe_event(peak_scores, peak_rms, peak_clip):
         "clipped": clipped,
         "peak_rms": [int(value) for value in peak_rms],
         "t_ms": time.ticks_ms(),
-    }))
+    })
+    print(line)
+    if uart is not None:
+        uart.write(line + "\n")
 
 
 def main():
     adcs = tuple(ADC(Pin(pin)) for pin in PINS)
+    uart = UART(0, baudrate=UART_BAUD, tx=Pin(UART_TX_PIN), rx=Pin(UART_RX_PIN))
     quiet_high, trigger = calibrate(adcs)
     if RUN_LEVEL_CALIBRATION:
         scales = calibrate_levels(adcs, quiet_high, trigger)
@@ -244,7 +251,7 @@ def main():
                     peak_clip[i] = max(peak_clip[i], clip[i])
 
             if event_active and time.ticks_diff(now, last_loud_ms) >= EVENT_END_MS:
-                describe_event(peak_scores, peak_rms, peak_clip)
+                describe_event(peak_scores, peak_rms, peak_clip, uart)
                 event_active = False
                 peak_scores = [0.0, 0.0, 0.0]
                 peak_rms = [0.0, 0.0, 0.0]

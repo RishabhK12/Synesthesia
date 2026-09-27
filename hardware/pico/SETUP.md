@@ -96,6 +96,7 @@ comparisons with the two MAX4466 modules. Reflections from walls and a sound
 source far from a small microphone array can also make the result ambiguous.
 Treat these outputs as a prototype test, not reliable navigation information.
 `all_sensors_test.py` remains available for raw per-mic diagnostics.
+For the ESP32-WROOM-32 Bluetooth bridge, see `../esp32/SETUP.md`.
 
 ## Hardware
 
