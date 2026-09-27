@@ -2,3 +2,4 @@
 *.keystore
 /diagnostic-data/
 /compass-data/
+/.tools/
