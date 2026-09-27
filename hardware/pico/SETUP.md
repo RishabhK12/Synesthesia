@@ -8,6 +8,40 @@
 - The test uses only built-in MicroPython modules. No pip packages, Arduino IDE,
   ESP32 setup, or phone software are needed for this stage.
 
+## Experimental three-microphone direction test
+
+Run `hardware/pico/direction_test.py` in Thonny. `Open Thonny for Pico.cmd`
+opens this file. It uses GP26 for MAX4466, GP27 for MAX9814, and GP28 for
+MAX4466. Power all three from 3V3(OUT) and connect their grounds to AGND;
+keep the three OUT wires separate. The code sends nothing to a phone or network.
+
+Mount the microphones apart on a rigid frame. At the top of the script, set
+`ANGLES` to their real positions, measured clockwise from the front. The
+default `(0, 120, 240)` means GP26 is front, GP27 is right, GP28 is left.
+If they are close together on a breadboard, sound level alone will give little
+direction information.
+
+1. Start with 5 seconds of normal quiet. The script measures each mic's quiet
+   RMS level and sets a separate event trigger. Keep hands away from the wires.
+2. Make a short clap or speak for a second near one side, then pause. Repeat
+   from the other two sides at the same distance. A report appears after sound
+   falls below the trigger for about 180 ms.
+3. Read the `RMS ... (triggers ...)` line every second. If quiet readings exceed
+   a trigger, restart in a quieter setup, check wiring, or reduce MAX4466 gain.
+   If speech never crosses a trigger, use a louder test sound or cautiously
+   reduce `TRIGGER_MULTIPLIER` from 1.8. Lower values also admit more false
+   events. The MAX4466 trim pots adjust gain; turn them gently.
+4. If an event says `CLIPPED`, reduce gain or move the sound farther away.
+   `uncertain direction` means the channels did not favor one area enough.
+
+The angle is a *rough sound-level direction*, not a measured arrival angle.
+The Pico reads its ADC channels in quick succession rather than simultaneously.
+The MAX9814 changes gain automatically, so it can distort sound-level
+comparisons with the two MAX4466 modules. Reflections from walls and a sound
+source far from a small microphone array can also make the result ambiguous.
+Treat these outputs as a prototype test, not reliable navigation information.
+`all_sensors_test.py` remains available for raw per-mic diagnostics.
+
 ## Hardware
 
 Use a Pico with soldered headers (or properly soldered wires), a USB data cable,
