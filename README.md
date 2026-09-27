@@ -36,7 +36,7 @@ Only compact direction events travel over Bluetooth. Sound classification runs o
 ## Run the demonstration
 
 1. Follow the [Pico setup](hardware/pico/SETUP.md) and [ESP32 setup](hardware/esp32/SETUP.md) to wire, calibrate, and test the sensor rig. Each board uses its own USB power connection; the boards share a ground and a Pico-to-ESP32 UART data wire.
-2. Publish the [`web/` folder](web/) as a static HTTPS site. A [GitHub Pages workflow](.github/workflows/pages.yml) is included. In the repository's Pages settings, select **GitHub Actions** as the build source, then run **Publish phone page** from the Actions tab.
+2. Serve the [`web/` folder](web/) from a static HTTPS site. A secure page is required for the phone's microphone and Bluetooth connection.
 3. Open the site in Chrome on an Android phone. Save a name if you want name alerts. Power the sensor rig and leave it quiet for five seconds while the Pico measures its background.
 4. Tap **Connect**, choose **SynDir**, and allow Bluetooth access. Tap **Start** to enable sound classification. The Name alerts row reports whether local name recognition is available. **Show** enables the optional camera background.
 5. With a helper, make one sound at a time from known positions around the rig. Compare the displayed cue with the actual position. Use the rig-front offset in **Sensor setup and diagnostics** if the array and camera face different directions.
